@@ -24,6 +24,19 @@ const orderSchema = new mongoose.Schema({
     enum: ['en attente', 'confirmé', 'en livraison', 'livré', 'retour', 'annulé'],
     default: 'en attente',
   },
+  // ===== Chargily ePay =====
+  paymentMethod: {
+    type: String,
+    enum: ['livraison', 'CIB', 'EDAHABIA'],
+    default: 'livraison',
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['non payé', 'en attente', 'payé', 'échoué'],
+    default: 'non payé',
+  },
+  chargilyInvoiceId: { type: String, default: null },
+  // =========================
 }, { timestamps: true })
 
 module.exports = mongoose.model('Order', orderSchema)

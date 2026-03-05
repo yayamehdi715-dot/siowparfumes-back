@@ -16,6 +16,7 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/payment', require('./routes/paymentRoutes')); // ← Chargily ePay
 
 // Connexion MongoDB
 mongoose.connect(process.env.MONGO_URI)
