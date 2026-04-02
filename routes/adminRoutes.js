@@ -1,56 +1,72 @@
 // routes/adminRoutes.js
-const express = require('express');
-const router = express.Router();
-const Order = require('../models/Order');
-const { authenticateAdmin } = require('../middleware/auth');
+const express = require('express')
+const router  = express.Router()
+const Order   = require('../models/Order')
+const Product = require('../models/Product')
+const { authenticateAdmin } = require('../middleware/auth')
 
-// GET statistiques
+// ── GET /api/admin/stats ─────────────────────────────────────────
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    // Commandes livrées
-    const deliveredOrders = await Order.find({ status: 'livré' });
-    
-    // Commandes retournées
-    const returnedOrders = await Order.find({ status: 'retour' });
-    
-    // Calcul des gains (commandes livrées uniquement)
-    const totalRevenue = deliveredOrders.reduce((sum, order) => sum + order.total, 0);
-    
-    // Nombre de produits livrés
-    const productsDelivered = deliveredOrders.reduce((sum, order) => {
-      return sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
-    }, 0);
-    
-    // Nombre de retours
-    const returnsCount = returnedOrders.length;
+    const [allOrders, products] = await Promise.all([
+      Order.find().populate('items.product', 'category'),
+      Product.countDocuments(),
+    ])
+
+    const byStatus = (status) => allOrders.filter((o) => o.status === status)
+
+    const delivered  = byStatus('livré')
+    const returned   = byStatus('retour')
+    const confirmed  = byStatus('confirmé')
+    const inDelivery = byStatus('en livraison')
+    const cancelled  = byStatus('annulé')
+
+    // Chiffre d'affaires = commandes livrées uniquement
+    const totalRevenue = delivered.reduce((sum, o) => sum + o.total, 0)
+
+    // Produits livrés (quantités)
+    const productsDelivered = delivered.reduce(
+      (sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0
+    )
+
+    // Stats par catégorie (basées sur les commandes livrées)
+    const byCategory = {}
+    delivered.forEach((order) => {
+      order.items.forEach((item) => {
+        const cat = item.product?.category || 'Autre'
+        if (!byCategory[cat]) byCategory[cat] = { orders: 0, revenue: 0 }
+        byCategory[cat].orders  += item.quantity
+        byCategory[cat].revenue += item.price * item.quantity
+      })
+    })
 
     res.json({
       totalRevenue,
+      totalOrders:       allOrders.length,
+      deliveredOrders:   delivered.length,
+      returnOrders:      returned.length,
+      confirmedOrders:   confirmed.length,
+      inDeliveryOrders:  inDelivery.length,
+      cancelledOrders:   cancelled.length,
       productsDelivered,
-      returnsCount,
-      deliveredOrdersCount: deliveredOrders.length,
-      totalOrders: await Order.countDocuments()
-    });
+      totalProducts:     products,
+      byCategory,
+    })
 
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message })
   }
-});
+})
 
-// POST reset des statistiques (optionnel - supprime toutes les commandes livrées/retournées)
+// ── POST /api/admin/stats/reset ──────────────────────────────────
+// Supprime les commandes livrées et retournées (reset compteurs)
 router.post('/stats/reset', authenticateAdmin, async (req, res) => {
   try {
-    const result = await Order.deleteMany({ 
-      status: { $in: ['livré', 'retour'] } 
-    });
-    
-    res.json({ 
-      message: 'Statistiques réinitialisées', 
-      deletedCount: result.deletedCount 
-    });
+    const result = await Order.deleteMany({ status: { $in: ['livré', 'retour'] } })
+    res.json({ message: 'Statistiques réinitialisées', deletedCount: result.deletedCount })
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message })
   }
-});
+})
 
-module.exports = router;
+module.exports = router
