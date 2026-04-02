@@ -1,41 +1,54 @@
 // routes/productRoutes.js
-const express = require('express')
-const router = express.Router()
-const Product = require('../models/Product')
+const express  = require('express')
+const router   = express.Router()
+const Product  = require('../models/Product')
 const cloudinary = require('../config/cloudinary')
 const { authenticateAdmin } = require('../middleware/auth')
 
-// Extrait le public_id Cloudinary depuis une URL
-// Ex: https://res.cloudinary.com/demo/image/upload/v123/lamode28/abc.jpg → lamode28/abc
+// Extraire le public_id Cloudinary depuis une URL
 function getPublicId(url) {
   try {
-    const parts = url.split('/')
-    const uploadIndex = parts.indexOf('upload')
-    // Ignore la version (v123) si présente
-    const startIndex = parts[uploadIndex + 1]?.startsWith('v')
-      ? uploadIndex + 2
-      : uploadIndex + 1
-    const filePart = parts.slice(startIndex).join('/')
-    // Retire l'extension
+    const parts      = url.split('/')
+    const uploadIdx  = parts.indexOf('upload')
+    const startIdx   = parts[uploadIdx + 1]?.startsWith('v')
+      ? uploadIdx + 2
+      : uploadIdx + 1
+    const filePart   = parts.slice(startIdx).join('/')
     return filePart.replace(/\.[^/.]+$/, '')
   } catch {
     return null
   }
 }
 
-// GET tous les produits (public)
+// ── GET /api/products ────────────────────────────────────────────
+// Paramètres optionnels : ?category=  ?search=  ?bestSeller=true  ?featured=true  ?limit=
 router.get('/', async (req, res) => {
   try {
-    const { category } = req.query
-    const filter = category ? { category } : {}
-    const products = await Product.find(filter).sort({ createdAt: -1 })
+    const { category, search, bestSeller, featured, limit } = req.query
+    const filter = {}
+
+    if (category)                          filter.category   = category
+    if (bestSeller === 'true')             filter.bestSeller = true
+    if (featured   === 'true')             filter.featured   = true
+    if (search) {
+      filter.$or = [
+        { name:        { $regex: search, $options: 'i' } },
+        { brand:       { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ]
+    }
+
+    let query = Product.find(filter).sort({ createdAt: -1 })
+    if (limit) query = query.limit(parseInt(limit, 10))
+
+    const products = await query
     res.json(products)
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
 })
 
-// GET un produit par ID (public)
+// ── GET /api/products/:id ────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
@@ -46,10 +59,10 @@ router.get('/:id', async (req, res) => {
   }
 })
 
-// POST créer un produit (admin uniquement)
+// ── POST /api/products (admin) ───────────────────────────────────
 router.post('/', authenticateAdmin, async (req, res) => {
   try {
-    const product = new Product(req.body)
+    const product    = new Product(req.body)
     const newProduct = await product.save()
     res.status(201).json(newProduct)
   } catch (error) {
@@ -57,7 +70,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
   }
 })
 
-// PUT modifier un produit (admin uniquement)
+// ── PUT /api/products/:id (admin) ────────────────────────────────
 router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     const product = await Product.findByIdAndUpdate(
@@ -72,22 +85,20 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
   }
 })
 
-// DELETE supprimer un produit + ses images Cloudinary (admin uniquement)
+// ── DELETE /api/products/:id (admin) ────────────────────────────
 router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
     if (!product) return res.status(404).json({ message: 'Produit non trouvé' })
 
-    // Supprimer les images Cloudinary
-    if (product.images && product.images.length > 0) {
-      const deletePromises = product.images.map((url) => {
-        const publicId = getPublicId(url)
-        if (publicId) {
-          return cloudinary.uploader.destroy(publicId)
-        }
-        return Promise.resolve()
-      })
-      await Promise.all(deletePromises)
+    // Supprimer les images Cloudinary associées
+    if (product.images?.length > 0) {
+      await Promise.all(
+        product.images.map((url) => {
+          const publicId = getPublicId(url)
+          return publicId ? cloudinary.uploader.destroy(publicId) : Promise.resolve()
+        })
+      )
     }
 
     await Product.findByIdAndDelete(req.params.id)
